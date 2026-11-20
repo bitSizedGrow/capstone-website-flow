@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PPMIS — How the system loads, per action (7-part split)</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #ffffff; --ink: #1d1f23; --muted: #5d636e; --line: #dcdfe4;
+    --accent: #1f5fbf; --chip: #eef2f8; --code: #f1f1ee;
+    --p1:#1f5fbf; --p2:#7a4cc2; --p3:#c2551f; --p4:#13866f; --p5:#a8721a; --p6:#b8336a; --p7:#4a5868;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16181c; --card:#1e2126; --ink:#e7e9ec; --muted:#a3a9b3; --line:#343941;
+      --accent:#7fb0ff; --chip:#262b33; --code:#262a30;
+      --p1:#7fb0ff; --p2:#b99af0; --p3:#f0a07a; --p4:#5fd1b5; --p5:#e5bb6b; --p6:#f08ab3; --p7:#aab6c4; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 20px; margin: 40px 0 10px; }
+  h3 { font-size: 17px; margin: 0; }
+  p.lead { color: var(--muted); margin: 0 0 18px; max-width: 840px; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; background: var(--code);
+    padding: 1px 5px; border-radius: 4px; }
+  .note { border-left: 3px solid var(--accent); background: var(--card); padding: 10px 14px; border-radius: 6px;
+    color: var(--muted); font-size: 14px; margin-bottom: 10px; }
+  figure { margin: 16px 0 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  figure svg { width: 100%; height: auto; display: block; color: var(--ink); }
+  figcaption { color: var(--muted); font-size: 13.5px; margin-top: 10px; }
+  .split { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin: 14px 0 6px; }
+  .split a { text-decoration: none; color: inherit; background: var(--card); border: 1px solid var(--line);
+    border-top: 4px solid var(--c); border-radius: 8px; padding: 10px; font-size: 13px; }
+  .split b { display: block; font-size: 14px; }
+  .split span { color: var(--muted); }
+  @media (max-width: 860px) { .split { grid-template-columns: repeat(2, 1fr); } }
+  section.part { background: var(--card); border: 1px solid var(--line); border-top: 5px solid var(--c);
+    border-radius: 10px; margin: 22px 0; padding: 18px 18px 8px; }
+  .part-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 4px; }
+  .tag { color: var(--c); font-weight: 700; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; }
+  .count { color: var(--muted); font-size: 13px; }
+  .owns { color: var(--muted); font-size: 13.5px; margin: 6px 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+    border-bottom: 1px solid var(--line); padding: 6px 8px; }
+  td { vertical-align: top; border-bottom: 1px solid var(--line); padding: 10px 8px; }
+  tr:last-child td { border-bottom: 0; }
+  td.n { color: var(--c); font-weight: 700; width: 34px; }
+  td.a { width: 190px; font-weight: 600; }
+  .flow { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .flow span { background: var(--chip); border-radius: 5px; padding: 2px 7px; font-size: 13px; }
+  .flow i { font-style: normal; color: var(--muted); font-size: 12px; }
+  ol.where { margin: 8px 0 0; padding-left: 22px; font-size: 13px; color: var(--muted); }
+  ol.where li { margin: 2px 0; }
+  ol.where code { color: var(--ink); background: transparent; padding: 0; font-weight: 600; }
+  .start { margin: 4px 0 12px; font-size: 13.5px; }
+  .start b { color: var(--c); }
+  .ex { margin-top: 30px; }
+  .ex ul { columns: 2; color: var(--muted); font-size: 14px; }
+  @media (max-width: 700px) { td.a { width: auto; } .ex ul { columns: 1; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>PPMIS — how the system loads, per action</h1>
+<p class="lead">Every user action, traced from the click to the files that answer it, then split into 7 parts so each teammate owns a section they can explain. 53 actions in total: 53 ÷ 7 ≈ 7.6, so four parts have 8 actions and three have 7. Parts with heavier files (the workspace, amendments) got the 7s.</p>
+<div class="note"><b>How to read each action:</b> the chips show the flow in one line. The numbered list under it is <b>where to look</b>, as <code>file:line</code>, in the order the code runs. Open the file, jump to that line, and read until the next item. Line numbers are from the current <code>main</code> branch and will shift a little as the code changes. If one has moved, search for the function name shown next to it.</div>
+<div class="note">Out of scope, as requested: <code>modules/report/generate.php</code> and the classes only it uses: <code>DocTemplate</code>, <code>DocTemplates</code>, <code>DocTables</code>, <code>DocTableEditor</code>, <code>DocInputDoc</code>, <code>DocExport</code>, <code>GeneratedDocs</code>, <code>ReportData</code>, <code>RevisedAnnexD</code>. Pages that only <em>link</em> to the generator (Reports, the workspace, amendments) are still covered.</div>
+
+<h2>The load pipeline every page shares</h2>
+<p class="lead">Every page in <code>modules/</code> and the root follows the same order. Each part below shows only what is different for its actions.</p>
+
+<figure>
+<svg viewBox="0 0 1060 430" role="img" aria-label="A page request runs config, then session, then an access gate. A POST runs its handler and redirects back. A GET runs queries, buffers the body, then header.php, the body, and footer.php are sent. The browser then runs main.js and theme.js, which call the JSON APIs.">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <g font-family="system-ui, sans-serif" font-size="12" fill="currentColor">
+    <rect x="10" y="20" width="140" height="62" rx="8" fill="none" stroke="currentColor"/>
+    <text x="80" y="45" text-anchor="middle" font-weight="700">Browser request</text>
+    <text x="80" y="64" text-anchor="middle">GET or POST a .php</text>
+
+    <rect x="200" y="20" width="200" height="62" rx="8" fill="none" stroke="currentColor"/>
+    <text x="300" y="42" text-anchor="middle" font-weight="700">config/database.php</text>
+    <text x="300" y="59" text-anchor="middle">config.php · SystemClock::boot()</text>
+    <text x="300" y="74" text-anchor="middle">getDB() → PostgreSQL (PDO)</text>
+
+    <rect x="450" y="20" width="220" height="62" rx="8" fill="none" stroke="currentColor"/>
+    <text x="560" y="42" text-anchor="middle" font-weight="700">includes/session.php</text>
+    <text x="560" y="59" text-anchor="middle">StageConfig · Navigation</text>
+    <text x="560" y="74" text-anchor="middle">ActivityLog · Permissions · session_start</text>
+
+    <rect x="720" y="20" width="330" height="62" rx="8" fill="none" stroke="#c2551f" stroke-width="2"/>
+    <text x="885" y="42" text-anchor="middle" font-weight="700">Gate</text>
+    <text x="885" y="59" text-anchor="middle">requireLogin / requireStaff / requireAdmin</text>
+    <text x="885" y="74" text-anchor="middle">refreshSessionUser() re-reads role every 60 s</text>
+
+    <line x1="150" y1="51" x2="196" y2="51" stroke="currentColor" marker-end="url(#ar)"/>
+    <line x1="400" y1="51" x2="446" y2="51" stroke="currentColor" marker-end="url(#ar)"/>
+    <line x1="670" y1="51" x2="716" y2="51" stroke="currentColor" marker-end="url(#ar)"/>
+    <text x="885" y="104" text-anchor="middle" fill="#c2551f">fails → flash + redirect to login / index</text>
+
+    <line x1="885" y1="112" x2="885" y2="140" stroke="currentColor"/>
+    <line x1="235" y1="140" x2="885" y2="140" stroke="currentColor"/>
+    <line x1="885" y1="140" x2="885" y2="166" stroke="currentColor" marker-end="url(#ar)"/>
+    <line x1="235" y1="140" x2="235" y2="166" stroke="currentColor" marker-end="url(#ar)"/>
+    <text x="245" y="158">POST (a form button)</text>
+    <text x="875" y="158" text-anchor="end">GET (open the page)</text>
+
+    <rect x="60" y="170" width="350" height="88" rx="8" fill="none" stroke="currentColor"/>
+    <text x="235" y="192" text-anchor="middle" font-weight="700">POST handler at top of page</text>
+    <text x="235" y="210" text-anchor="middle">verifyCsrf() → switch on $_POST['action']</text>
+    <text x="235" y="226" text-anchor="middle">handleUpload() → Azure · DB writes · logActivity()</text>
+    <text x="235" y="242" text-anchor="middle">flash('…') → header('Location: same page')</text>
+    <path d="M60,214 C10,214 10,110 10,95 L10,86" fill="none" stroke="currentColor" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+    <text x="16" y="130">redirect = new GET</text>
+
+    <rect x="720" y="170" width="330" height="88" rx="8" fill="none" stroke="currentColor"/>
+    <text x="885" y="192" text-anchor="middle" font-weight="700">Page logic</text>
+    <text x="885" y="210" text-anchor="middle">queries · StageConfig / ProjectWorkflow rules</text>
+    <text x="885" y="226" text-anchor="middle">$pageTitle, $activePage, $breadcrumb</text>
+    <text x="885" y="242" text-anchor="middle">ob_start() … body HTML … ob_get_clean()</text>
+
+    <rect x="720" y="296" width="330" height="62" rx="8" fill="none" stroke="currentColor"/>
+    <text x="885" y="318" text-anchor="middle" font-weight="700">includes/header.php</text>
+    <text x="885" y="335" text-anchor="middle">CSS · theme pre-paint · sidebar · bell · role pill</text>
+    <text x="885" y="350" text-anchor="middle">renderFlashes()</text>
+    <line x1="885" y1="258" x2="885" y2="292" stroke="currentColor" marker-end="url(#ar)"/>
+
+    <rect x="470" y="296" width="200" height="62" rx="8" fill="none" stroke="currentColor"/>
+    <text x="570" y="322" text-anchor="middle" font-weight="700">echo $pageContent</text>
+    <text x="570" y="340" text-anchor="middle">the buffered body</text>
+    <line x1="720" y1="327" x2="674" y2="327" stroke="currentColor" marker-end="url(#ar)"/>
+
+    <rect x="200" y="296" width="220" height="62" rx="8" fill="none" stroke="currentColor"/>
+    <text x="310" y="318" text-anchor="middle" font-weight="700">includes/footer.php</text>
+    <text x="310" y="335" text-anchor="middle">bootstrap · Chart.js · mammoth · SheetJS</text>
+    <text x="310" y="350" text-anchor="middle">main.js · theme.js · $extraScripts</text>
+    <line x1="470" y1="327" x2="424" y2="327" stroke="currentColor" marker-end="url(#ar)"/>
+
+    <rect x="10" y="296" width="150" height="120" rx="8" fill="none" stroke="#13866f" stroke-width="2"/>
+    <text x="85" y="318" text-anchor="middle" font-weight="700">In the browser</text>
+    <text x="85" y="338" text-anchor="middle">sidebar toggle, Toast</text>
+    <text x="85" y="354" text-anchor="middle">PDCNotifications.init()</text>
+    <text x="85" y="370" text-anchor="middle">ThemeManager</text>
+    <text x="85" y="386" text-anchor="middle">page script (modals)</text>
+    <text x="85" y="404" text-anchor="middle" fill="#13866f">fetch → api/*.php</text>
+    <line x1="200" y1="327" x2="164" y2="327" stroke="currentColor" marker-end="url(#ar)"/>
+
+    <rect x="200" y="378" width="470" height="40" rx="8" fill="none" stroke="#13866f" stroke-dasharray="4 3"/>
+    <text x="435" y="402" text-anchor="middle">api/*.php: same config → session, then requireLoginJson / requireStaffJson, answers JSON</text>
+    <line x1="160" y1="398" x2="196" y2="398" stroke="#13866f" marker-end="url(#ar)"/>
+  </g>
+</svg>
+<figcaption>Top row runs on every request. A POST does its work and redirects (Post/Redirect/Get), so the result is always shown by a fresh GET. The body is built first and buffered, then wrapped by the header and footer. After that, JavaScript in the browser calls the JSON endpoints in <code>api/</code>, which go through the same bootstrap. A worked example: <code>index.php:16-18</code> (bootstrap + gate) → <code>index.php:193</code> (<code>ob_start</code>) → <code>index.php:732-735</code> (header, body, footer).</figcaption>
+</figure>
+
+<h2>The 7 parts at a glance</h2>
+<div class="split">
+  <a href="#p1" style="--c:var(--p1)"><b>Part 1</b>App shell &amp; dashboard<br><span>8 actions</span></a>
+  <a href="#p2" style="--c:var(--p2)"><b>Part 2</b>Sign-in &amp; accounts<br><span>8 actions</span></a>
+  <a href="#p3" style="--c:var(--p3)"><b>Part 3</b>New project &amp; workspace<br><span>7 actions</span></a>
+  <a href="#p4" style="--c:var(--p4)"><b>Part 4</b>PDCs &amp; refunds<br><span>8 actions</span></a>
+  <a href="#p5" style="--c:var(--p5)"><b>Part 5</b>Progress monitoring<br><span>7 actions</span></a>
+  <a href="#p6" style="--c:var(--p6)"><b>Part 6</b>Amendments<br><span>7 actions</span></a>
+  <a href="#p7" style="--c:var(--p7)"><b>Part 7</b>Admin, reports &amp; settings<br><span>8 actions</span></a>
+</div>
+
+<!-- PART 1 -->
+<section class="part" id="p1" style="--c:var(--p1)">
+  <div class="part-head"><span class="tag">Part 1</span><h3>App shell, shared loading &amp; dashboard</h3><span class="count">8 actions</span></div>
+  <p class="owns">Owns the pipeline above. Everyone else depends on this part, so this teammate should be able to explain it first. Files: <code>config/database.php</code>, <code>includes/session.php</code>, <code>includes/header.php</code>, <code>includes/footer.php</code>, <code>Navigation</code>, <code>SystemClock</code>, <code>index.php</code>, <code>file.php</code>, <code>logout.php</code>, <code>assets/js/main.js</code> (shared parts), <code>assets/js/theme.js</code>.</p>
+  <p class="start"><b>Start here:</b> <code>includes/session.php</code> top to bottom (397 lines). Almost every function the other parts call is defined in it.</p>
+  <table>
+    <tr><th>#</th><th>Action</th><th>How it loads · where to look</th></tr>
+    <tr><td class="n">1</td><td class="a">Any page is opened (bootstrap)</td><td><div class="flow"><span>config/database.php</span><i>→</i><span>SystemClock::boot()</span><i>→</i><span>includes/session.php</span><i>→</i><span>session_start + ID regenerated every 30 min</span><i>→</i><span>getDB() on first query</span></div>
+      <ol class="where">
+        <li><code>config/database.php:9-11</code> loads config.php and boots the clock</li>
+        <li><code>config/database.php:15-27</code> app constants (APP_BASE, upload limits, allowed types)</li>
+        <li><code>config/database.php:29-56</code> <code>getDB()</code>: one shared PDO connection, Manila time zone</li>
+        <li><code>includes/session.php:3-7</code> loads the shared classes</li>
+        <li><code>includes/session.php:9-24</code> starts the session and regenerates its ID</li>
+      </ol></td></tr>
+    <tr><td class="n">2</td><td class="a">Access is checked</td><td><div class="flow"><span>requireLogin / requireStaff / requireAdmin</span><i>→</i><span>refreshSessionUser() (role + status, every 60 s)</span><i>→</i><span>inactive or password changed → logged out</span><i>|</i><span>JSON: requireLoginJson / requireStaffJson → 401 / 403</span></div>
+      <ol class="where">
+        <li><code>includes/session.php:43</code> <code>requireLogin()</code></li>
+        <li><code>includes/session.php:57-117</code> <code>refreshSessionUser()</code>: re-reads role, logs out deactivated users and sessions older than a password reset</li>
+        <li><code>includes/session.php:155-168</code> <code>isAdmin()</code>, <code>isStaff()</code>, <code>roleLabel()</code></li>
+        <li><code>includes/session.php:190</code> <code>requireStaff()</code>, <code>:226</code> <code>requireAdmin()</code></li>
+        <li><code>includes/session.php:201</code> <code>requireLoginJson()</code>, <code>:212</code> <code>requireStaffJson()</code> (used by <code>api/</code>)</li>
+      </ol></td></tr>
+    <tr><td class="n">3</td><td class="a">Page layout is drawn</td><td><div class="flow"><span>ob_start body</span><i>→</i><span>header.php: CSS, inline theme, sidebar, breadcrumb, bell, role pill, dev-clock banner</span><i>→</i><span>echo body</span><i>→</i><span>footer.php: Quick Links, libraries, main.js, theme.js</span></div>
+      <ol class="where">
+        <li><code>includes/classes/Navigation.php:33-104</code> the menu list (<code>$items</code>)</li>
+        <li><code>includes/classes/Navigation.php:113</code> <code>visibleItems()</code> role filter, <code>:156</code> <code>breadcrumb()</code>, <code>:216</code> <code>renderSidebar()</code></li>
+        <li><code>includes/header.php:8-17</code> stylesheets, <code>:21-34</code> theme applied before paint</li>
+        <li><code>includes/header.php:53</code> sidebar, <code>:101</code> breadcrumb, <code>:111-134</code> bell markup, <code>:144-181</code> role pill</li>
+        <li><code>includes/header.php:186-195</code> dev-clock banner (<code>SystemClock::isManual()</code>)</li>
+        <li><code>includes/footer.php:22</code> Quick Links, <code>:52-58</code> scripts load order</li>
+        <li><code>includes/session.php:306</code> <code>assetPath()</code> cache-busting <code>?v=</code></li>
+      </ol></td></tr>
+    <tr><td class="n">4</td><td class="a">A form is submitted (shared pattern)</td><td><div class="flow"><span>verifyCsrf()</span><i>→</i><span>work</span><i>→</i><span>logActivity() inside SAVEPOINT</span><i>→</i><span>flash()</span><i>→</i><span>redirect</span><i>→</i><span>renderFlashes() in header</span></div>
+      <ol class="where">
+        <li><code>includes/session.php:277-290</code> <code>csrfToken()</code> / <code>verifyCsrf()</code></li>
+        <li><code>includes/session.php:363-397</code> <code>logActivity()</code> and why it uses a SAVEPOINT</li>
+        <li><code>includes/session.php:241</code> <code>flash()</code>, <code>:256</code> <code>renderFlashes()</code></li>
+        <li><code>includes/header.php:201-205</code> where the flashes appear</li>
+        <li>Example: <code>modules/project/workspace.php:49-52</code> <code>wsBack()</code> redirect helper</li>
+      </ol></td></tr>
+    <tr><td class="n">5</td><td class="a">Open the Dashboard</td><td><div class="flow"><span>index.php</span><i>→</i><span>StageConfig::dashboardBucket() status counts</span><i>→</i><span>refund totals, recent projects</span><i>→</i><span>admin only: accounts + activity</span><i>→</i><span>due-date list via PDCNotifications.fetch(6)</span></div>
+      <ol class="where">
+        <li><code>index.php:16-18</code> bootstrap + <code>requireLogin()</code></li>
+        <li><code>index.php:37-46</code> status counts using <code>StageConfig::dashboardBucket()</code> (<code>StageConfig.php:305</code>)</li>
+        <li><code>index.php:55-63</code> refund totals, <code>:69-83</code> recently updated projects</li>
+        <li><code>index.php:85-118</code> admin-only panels (accounts, activity)</li>
+        <li><code>index.php:189-193</code> page title, breadcrumb, <code>ob_start()</code></li>
+        <li><code>index.php:664-728</code> due-date block filled by <code>PDCNotifications.fetch(6)</code></li>
+        <li><code>index.php:732-735</code> header, body, footer</li>
+      </ol></td></tr>
+    <tr><td class="n">6</td><td class="a">Notification bell</td><td><div class="flow"><span>main.js PDCNotifications.init()</span><i>→</i><span>GET api/pdc_notifications.php</span><i>→</i><span>paintBadge() + paintPanel()</span><i>→</i><span>refresh on a timer</span></div>
+      <ol class="where">
+        <li><code>assets/js/main.js:1555</code> started on <code>DOMContentLoaded</code></li>
+        <li><code>assets/js/main.js:1313</code> <code>PDCNotifications</code>, <code>:1327</code> <code>fetch()</code>, <code>:1336</code> <code>init()</code>, <code>:1362</code> refresh timer</li>
+        <li><code>api/pdc_notifications.php:21</code> login check, <code>:49</code> the due-date query, <code>:125</code> JSON answer</li>
+        <li><code>assets/js/main.js:1382</code> <code>paintBadge()</code>, <code>:1406</code> <code>paintPanel()</code></li>
+        <li><code>includes/classes/StageConfig.php:369-379</code> due-status rules (overdue / today / urgent)</li>
+      </ol></td></tr>
+    <tr><td class="n">7</td><td class="a">Preview a file</td><td><div class="flow"><span>previewFile() modal</span><i>→</i><span>file.php?path=…</span><i>→</i><span>path check</span><i>→</i><span>AzureStorage::download()</span><i>→</i><span>PDF/image inline · mammoth for .docx · SheetJS for .xlsx</span></div>
+      <ol class="where">
+        <li><code>assets/js/main.js:108</code> <code>previewFile()</code> builds the modal</li>
+        <li><code>file.php:6</code> login check, <code>:12</code> blocks <code>../</code> paths, <code>:18</code> download, <code>:24-29</code> streams it back</li>
+        <li><code>includes/classes/AzureStorage.php:40</code> <code>download()</code></li>
+        <li><code>assets/js/main.js:269</code> <code>loadDocxPreview()</code> (mammoth), <code>:190</code> <code>loadSheetPreview()</code> (SheetJS)</li>
+      </ol></td></tr>
+    <tr><td class="n">8</td><td class="a">Dark mode &amp; colours / Log out</td><td><div class="flow"><span>inline pre-paint script reads localStorage</span><i>→</i><span>theme.js ThemeManager (moon button, Settings › Appearance)</span><i>|</i><span>logout.php → session destroyed → login.php</span></div>
+      <ol class="where">
+        <li><code>includes/header.php:25-33</code> applies saved theme before the page paints</li>
+        <li><code>assets/js/theme.js:9</code> <code>ThemeManager</code>, <code>:31</code> <code>setDarkMode()</code>, <code>:72</code> button wiring</li>
+        <li><code>modules/settings/settings.php:375-436</code> Appearance section (dark switch, colours, reset)</li>
+        <li><code>logout.php:18-20</code> destroys the session, back to login</li>
+      </ol></td></tr>
+  </table>
+</section>
+
+<!-- PART 2 -->
+<section class="part" id="p2" style="--c:var(--p2)">
+  <div class="part-head"><span class="tag">Part 2</span><h3>Sign-in &amp; account recovery</h3><span class="count">8 actions</span></div>
+  <p class="owns">The pages a visitor sees before logging in. They load <code>session.php</code> but skip the gate and use their own layout (<code>login.css</code>, <code>password_reset_layout.php</code>). Files: <code>login.php</code>, <code>signup.php</code>, <code>verify_email.php</code>, <code>forgot_password.php</code>, <code>verify_reset_code.php</code>, <code>reset_password.php</code>, <code>api/google_login.php</code>, <code>api/google_signup.php</code>, <code>GoogleAuth</code>, <code>RateLimit</code>, <code>EmailVerification</code>, <code>PasswordReset</code>, <code>AdminNotify</code>, <code>includes/send_mail.php</code>.</p>
+  <p class="start"><b>Start here:</b> <code>login.php:15-90</code>, then <code>includes/session.php:141</code> <code>startUserSession()</code>: every sign-in path ends there.</p>
+  <table>
+    <tr><th>#</th><th>Action</th><th>How it loads · where to look</th></tr>
+    <tr><td class="n">9</td><td class="a">Sign in with password</td><td><div class="flow"><span>login.php POST</span><i>→</i><span>RateLimit::loginBlocked()</span><i>→</i><span>password_verify + active/approved check</span><i>→</i><span>startUserSession()</span><i>→</i><span>index.php</span></div>
+      <ol class="where">
+        <li><code>login.php:9</code> already signed in → dashboard</li>
+        <li><code>login.php:15</code> POST handler, <code>:50</code> rate-limit check (<code>RateLimit.php:46</code>)</li>
+        <li><code>login.php:62-69</code> status/approval checks + <code>password_verify()</code></li>
+        <li><code>login.php:71-75</code> clear failures, <code>startUserSession()</code>, redirect</li>
+        <li><code>login.php:84</code> wrong password → <code>RateLimit::recordLoginFailure()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">10</td><td class="a">Sign in with Google</td><td><div class="flow"><span>Google button</span><i>→</i><span>fetch api/google_login.php</span><i>→</i><span>GoogleAuth::verify(idToken)</span><i>→</i><span>status check</span><i>→</i><span>startUserSession()</span><i>→</i><span>JSON redirect</span></div>
+      <ol class="where">
+        <li><code>login.php:296-299</code> button callback posts the Google token</li>
+        <li><code>api/google_login.php:31</code> CSRF, <code>:39</code> <code>GoogleAuth::verify()</code> (<code>GoogleAuth.php:34</code>)</li>
+        <li><code>api/google_login.php:53-110</code> finds the account, checks pending / rejected / inactive</li>
+        <li><code>api/google_login.php:111</code> <code>startUserSession()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">11</td><td class="a">Sign up (form)</td><td><div class="flow"><span>signup.php POST</span><i>→</i><span>RateLimit::signupBlocked()</span><i>→</i><span>INSERT user (pending)</span><i>→</i><span>EmailVerification::sendLink()</span><i>→</i><span>"check your email" message</span></div>
+      <ol class="where">
+        <li><code>signup.php:32</code> POST handler (inline CSRF check)</li>
+        <li><code>signup.php:73</code> rate limit, <code>:83</code> clears old unverified attempts</li>
+        <li><code>signup.php:113-139</code> token + <code>INSERT INTO users</code> as pending</li>
+        <li><code>signup.php:146</code> <code>EmailVerification::sendLink()</code> (<code>EmailVerification.php:119</code>)</li>
+      </ol></td></tr>
+    <tr><td class="n">12</td><td class="a">Sign up with Google</td><td><div class="flow"><span>fetch api/google_signup.php</span><i>→</i><span>GoogleAuth::verify()</span><i>→</i><span>suggestUsername()</span><i>→</i><span>INSERT pending user</span><i>→</i><span>AdminNotify::newSignupRequest()</span></div>
+      <ol class="where">
+        <li><code>api/google_signup.php:62</code> CSRF, <code>:70</code> verify token, <code>:82</code> rate limit</li>
+        <li><code>api/google_signup.php:120-129</code> re-request after a rejection</li>
+        <li><code>api/google_signup.php:138</code> <code>GoogleAuth::suggestUsername()</code> (<code>GoogleAuth.php:109</code>)</li>
+        <li><code>api/google_signup.php:148</code> insert, <code>:161</code> notify admins (<code>AdminNotify.php:29</code>)</li>
+      </ol></td></tr>
+    <tr><td class="n">13</td><td class="a">Click the email-verify link</td><td><div class="flow"><span>verify_email.php?token=</span><i>→</i><span>EmailVerification::confirm()</span><i>→</i><span>admins notified</span><i>→</i><span>ok / expired message</span></div>
+      <ol class="where">
+        <li><code>verify_email.php:13</code> calls <code>confirm()</code>, <code>:17-23</code> redirect by result</li>
+        <li><code>includes/classes/EmailVerification.php:51</code> <code>confirm()</code>, <code>:76-77</code> notifies admins</li>
+      </ol></td></tr>
+    <tr><td class="n">14</td><td class="a">Forgot password</td><td><div class="flow"><span>forgot_password.php POST</span><i>→</i><span>PasswordReset::findAccount()</span><i>→</i><span>issueCode()</span><i>→</i><span>send_mail</span><i>→</i><span>verify_reset_code.php</span></div>
+      <ol class="where">
+        <li><code>forgot_password.php:25</code> POST, <code>:46</code> resend cooldown</li>
+        <li><code>forgot_password.php:51-53</code> <code>findAccount()</code> + <code>issueCode()</code> (<code>PasswordReset.php:62</code>, <code>:90</code>)</li>
+        <li><code>forgot_password.php:59-60</code> same message whether or not the email exists, then redirect</li>
+      </ol></td></tr>
+    <tr><td class="n">15</td><td class="a">Enter / resend reset code</td><td><div class="flow"><span>verify_reset_code.php action=verify|resend</span><i>→</i><span>PasswordReset::checkCode() / cooldownLeft()</span><i>→</i><span>reset_password.php</span></div>
+      <ol class="where">
+        <li><code>verify_reset_code.php:37-56</code> resend branch</li>
+        <li><code>verify_reset_code.php:67-77</code> verify branch → <code>checkCode()</code> (<code>PasswordReset.php:140</code>)</li>
+        <li><code>verify_reset_code.php:93</code> <code>cooldownLeft()</code> for the resend timer</li>
+      </ol></td></tr>
+    <tr><td class="n">16</td><td class="a">Set a new password</td><td><div class="flow"><span>reset_password.php POST</span><i>→</i><span>passwordProblem()</span><i>→</i><span>completeReset() sets password_changed_at</span><i>→</i><span>older sessions ended by refreshSessionUser()</span></div>
+      <ol class="where">
+        <li><code>reset_password.php:33-38</code> 10-minute window check</li>
+        <li><code>reset_password.php:51</code> <code>passwordProblem()</code> (<code>PasswordReset.php:249</code>)</li>
+        <li><code>reset_password.php:55</code> <code>completeReset()</code> (<code>PasswordReset.php:218</code>), <code>:62</code> → login</li>
+        <li><code>includes/session.php:95-111</code> where other old sessions get logged out</li>
+      </ol></td></tr>
+  </table>
+</section>
+
+<!-- PART 3 -->
+<section class="part" id="p3" style="--c:var(--p3)">
+  <div class="part-head"><span class="tag">Part 3</span><h3>Starting a project &amp; the project workspace</h3><span class="count">7 actions</span></div>
+  <p class="owns">Where a project is created and worked on stage by stage. <code>workspace.php</code> is the largest page (1,300 lines), so this part has 7 actions. Files: <code>modules/project/stage_approval.php</code>, <code>modules/project/workspace.php</code> (everything except the refund schedule and PDC parts), <code>ProjectWorkflow</code>, <code>StageConfig</code> (steps and rules), <code>ProponentMatcher</code>, <code>includes/upload.php</code>, <code>AzureStorage</code>, <code>api/extract_approval_letter.php</code>, <code>AIExtractor</code>, <code>GeminiExtractor</code>, <code>ClaudeExtractor</code>, <code>StageDocs</code> in main.js.</p>
+  <p class="start"><b>Start here:</b> <code>includes/classes/StageConfig.php:136-190</code> (which documents each stage needs), then <code>includes/classes/ProjectWorkflow.php:31-225</code> (the rules that lock steps and move stages).</p>
+  <table>
+    <tr><th>#</th><th>Action</th><th>How it loads · where to look</th></tr>
+    <tr><td class="n">17</td><td class="a">Start a project</td><td><div class="flow"><span>stage_approval.php (requireStaff)</span><i>→</i><span>JS proponent match as you type</span><i>→</i><span>POST: ProponentMatcher::findOrCreate()</span><i>→</i><span>handleUpload() approval letter</span><i>→</i><span>INSERT projects</span><i>→</i><span>advance to 1st Untagging</span><i>→</i><span>workspace.php?new=1</span></div>
+      <ol class="where">
+        <li><code>stage_approval.php:8</code> <code>requireStaff()</code>, <code>:14-18</code> existing project → workspace</li>
+        <li><code>stage_approval.php:51-52</code> POST + CSRF</li>
+        <li><code>stage_approval.php:74</code> <code>handleUpload()</code> (<code>includes/upload.php:10</code> → <code>AzureStorage.php:21</code>)</li>
+        <li><code>stage_approval.php:87</code> <code>ProponentMatcher::findOrCreate()</code> (<code>ProponentMatcher.php:44</code>)</li>
+        <li><code>stage_approval.php:92</code> <code>INSERT INTO projects</code>, <code>:109</code> logs the advance</li>
+        <li><code>stage_approval.php:328</code> browser-side proponent matching (mirrors <code>ProponentMatcher::normalize()</code>)</li>
+      </ol></td></tr>
+    <tr><td class="n">18</td><td class="a">AI reads the approval letter</td><td><div class="flow"><span>drop file</span><i>→</i><span>fetch api/extract_approval_letter.php (requireStaffJson)</span><i>→</i><span>AIExtractor::extractApprovalLetterFields()</span><i>→</i><span>Gemini / Claude</span><i>→</i><span>fills title, amount, date</span></div>
+      <ol class="where">
+        <li><code>stage_approval.php:481</code> (or <code>workspace.php:1261</code>) sends the file</li>
+        <li><code>api/extract_approval_letter.php:17</code> Staff check, <code>:55-56</code> extract + JSON</li>
+        <li><code>includes/classes/AIExtractor.php:13-19</code> picks Claude or Gemini</li>
+        <li><code>includes/classes/AISettings.php:177</code> <code>isUsable()</code> (is AI switched on and keyed)</li>
+      </ol></td></tr>
+    <tr><td class="n">19</td><td class="a">Open the workspace</td><td><div class="flow"><span>workspace.php?id= GET</span><i>→</i><span>ProjectWorkflow::advanceIfComplete() (auto status check)</span><i>→</i><span>ProjectWorkflow::load() + steps()</span><i>→</i><span>stage cards: done / current / locked</span></div>
+      <ol class="where">
+        <li><code>workspace.php:17</code> <code>requireStaff()</code>, <code>:29</code> <code>wsLoadProject()</code></li>
+        <li><code>workspace.php:319-326</code> GET status check → <code>advanceIfComplete()</code> (<code>ProjectWorkflow.php:166</code>)</li>
+        <li><code>workspace.php:330-331</code> <code>ProjectWorkflow::load()</code> / <code>steps()</code> (<code>ProjectWorkflow.php:31</code>, <code>:85</code>)</li>
+        <li><code>workspace.php:366-437</code> row builders (<code>wsLockedRow</code>, <code>wsViewRow</code>, …)</li>
+        <li><code>workspace.php:452-456</code> <code>ob_start()</code> + stage timeline, then one card per stage from <code>:584</code></li>
+      </ol></td></tr>
+    <tr><td class="n">20</td><td class="a">Edit approval details</td><td><div class="flow"><span>action=save_approval</span><i>→</i><span>validate fields</span><i>→</i><span>optional new letter upload</span><i>→</i><span>UPDATE projects</span><i>→</i><span>redirect #stage-approval</span></div>
+      <ol class="where">
+        <li><code>workspace.php:58-59</code> POST + CSRF</li>
+        <li><code>workspace.php:71-125</code> <code>save_approval</code> branch (validation <code>:90</code>, upload <code>:96</code>, advance <code>:121</code>)</li>
+        <li><code>workspace.php:595-695</code> the approval card form</li>
+      </ol></td></tr>
+    <tr><td class="n">21</td><td class="a">Upload stage documents</td><td><div class="flow"><span>StageDocs.picked() (file count, preview)</span><i>→</i><span>action=save_stage</span><i>→</i><span>ProjectWorkflow::canSubmit()</span><i>→</i><span>handleUpload() → Azure</span><i>→</i><span>INSERT submissions</span><i>→</i><span>advanceIfComplete()</span></div>
+      <ol class="where">
+        <li><code>assets/js/main.js:1145</code> <code>StageDocs</code> (<code>:1171</code> <code>picked()</code>, <code>:1194</code> <code>refreshCount()</code>)</li>
+        <li><code>workspace.php:198-317</code> <code>save_stage</code> branch</li>
+        <li><code>workspace.php:211</code> <code>canSubmit()</code> (<code>ProjectWorkflow.php:139</code>)</li>
+        <li><code>workspace.php:217-231</code> single-file upload + insert, <code>:260-270</code> multi-file</li>
+        <li><code>workspace.php:303</code> <code>advanceIfComplete()</code>, which may move the project to the next stage</li>
+      </ol></td></tr>
+    <tr><td class="n">22</td><td class="a">Remove a document</td><td><div class="flow"><span>confirm dialog</span><i>→</i><span>action=remove_document</span><i>→</i><span>DELETE submission</span><i>→</i><span>logActivity</span><i>→</i><span>redirect</span></div>
+      <ol class="where">
+        <li><code>workspace.php:427</code> <code>wsWithRemove()</code> adds the Remove button</li>
+        <li><code>workspace.php:183-196</code> <code>remove_document</code> branch (delete at <code>:190</code>)</li>
+      </ol></td></tr>
+    <tr><td class="n">23</td><td class="a">Unlock a finished step</td><td><div class="flow"><span>reason dialog (min 10 chars)</span><i>→</i><span>action=unlock_step</span><i>→</i><span>ProjectWorkflow::unlockStep()</span><i>→</i><span>step can be replaced</span></div>
+      <ol class="where">
+        <li><code>workspace.php:392</code> <code>wsLockedRow()</code> shows the Unlock button</li>
+        <li><code>workspace.php:63-69</code> <code>unlock_step</code> branch</li>
+        <li><code>includes/classes/ProjectWorkflow.php:28</code> minimum reason length, <code>:257</code> <code>unlockStep()</code></li>
+      </ol></td></tr>
+  </table>
+</section>
+
+<!-- PART 4 -->
+<section class="part" id="p4" style="--c:var(--p4)">
+  <div class="part-head"><span class="tag">Part 4</span><h3>PDCs (post-dated checks) &amp; refunds</h3><span class="count">8 actions</span></div>
+  <p class="owns">How refund checks get into the system and how their due dates are chased. Mostly JavaScript plus JSON endpoints. Files: the schedule and PDC parts of <code>workspace.php</code>, <code>PDCModal</code>, <code>notifyRefund</code>, <code>markRefundDone</code> and the notify/paid half of <code>PDCNotifications</code> in main.js, <code>api/extract_pdcs.php</code>, <code>api/submit_pdcs.php</code>, <code>api/refund_action.php</code>, <code>api/cron_refund_reminders.php</code>, <code>PdfPages</code>, <code>RefundReminder</code>, <code>includes/RefundNotificationMail.php</code>.</p>
+  <p class="start"><b>Start here:</b> <code>assets/js/main.js:302-1140</code> (<code>PDCModal</code>), then <code>api/submit_pdcs.php</code> top to bottom (228 lines).</p>
+  <table>
+    <tr><th>#</th><th>Action</th><th>How it loads · where to look</th></tr>
+    <tr><td class="n">24</td><td class="a">Set project &amp; refund dates</td><td><div class="flow"><span>workspace action=save_schedule</span><i>→</i><span>validate dates</span><i>→</i><span>UPDATE projects duration / refund start–end, approving authority</span><i>→</i><span>refund rows made by PDC submit or on stage advance</span><i>→</i><span>activated once Annex D is on file</span></div>
+      <ol class="where">
+        <li><code>workspace.php:463</code> the schedule card (<code>#project-schedule</code>)</li>
+        <li><code>workspace.php:127-181</code> <code>save_schedule</code> branch (update at <code>:156</code>)</li>
+        <li><code>includes/classes/ProjectWorkflow.php:233</code> <code>buildRefundScheduleIfMissing()</code></li>
+        <li><code>workspace.php:296-299</code> and <code>includes/session.php:341</code> activate rows once Annex D is on file</li>
+      </ol></td></tr>
+    <tr><td class="n">25</td><td class="a">Open the PDC modal &amp; fill checks</td><td><div class="flow"><span>PDCModal.open(projectId, fund)</span><i>→</i><span>restoreDraft()</span><i>→</i><span>addCard / autoFillAmounts / autoFillDates</span><i>→</i><span>updateTotal() vs fund amount</span></div>
+      <ol class="where">
+        <li><code>workspace.php:806</code> the Enter/Add PDCs button</li>
+        <li><code>assets/js/main.js:310</code> <code>open()</code>, <code>:1078</code> <code>restoreDraft()</code></li>
+        <li><code>assets/js/main.js:551</code> <code>addCard()</code>, <code>:600</code> <code>autoFillAmounts()</code>, <code>:626</code> <code>autoFillDates()</code></li>
+        <li><code>assets/js/main.js:663</code> <code>calcAdjusted()</code> (weekend/holiday date shift), <code>:477</code> <code>updateTotal()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">26</td><td class="a">Upload one PDF of all checks</td><td><div class="flow"><span>batchFileSelected()</span><i>→</i><span>loadPdfLib()</span><i>→</i><span>split pages</span><i>→</i><span>attachToSlot() per check</span></div>
+      <ol class="where">
+        <li><code>assets/js/main.js:717</code> <code>batchFileSelected()</code></li>
+        <li><code>assets/js/main.js:736</code> <code>loadPdfLib()</code>, <code>:748</code> <code>attachToSlot()</code></li>
+        <li><code>api/submit_pdcs.php:139</code> server side: <code>PdfPages::renderPage()</code> turns each page into an image</li>
+      </ol></td></tr>
+    <tr><td class="n">27</td><td class="a">AI reads the checks</td><td><div class="flow"><span>PDCModal.extractWithAI()</span><i>→</i><span>fetch api/extract_pdcs.php</span><i>→</i><span>AIExtractor::extractPdcChecks() + normalizePdcChecks()</span><i>→</i><span>applyExtractedChecks()</span></div>
+      <ol class="where">
+        <li><code>assets/js/main.js:836</code> <code>extractWithAI()</code> (fetch at <code>:866</code>)</li>
+        <li><code>api/extract_pdcs.php:23</code> Staff check, <code>:71-74</code> extract + JSON</li>
+        <li><code>includes/classes/AIExtractor.php:42</code> <code>extractPdcChecks()</code>, <code>:83</code> <code>normalizePdcChecks()</code></li>
+        <li><code>assets/js/main.js:926</code> <code>applyExtractedChecks()</code> fills the cards</li>
+      </ol></td></tr>
+    <tr><td class="n">28</td><td class="a">Submit the PDCs</td><td><div class="flow"><span>stage() → sendStaged()</span><i>→</i><span>POST api/submit_pdcs.php (requireStaffJson)</span><i>→</i><span>handleUpload + PdfPages</span><i>→</i><span>INSERT pdcs + refund_schedule</span><i>→</i><span>per-slot errors shown in modal</span></div>
+      <ol class="where">
+        <li><code>assets/js/main.js:1007</code> <code>stage()</code>, <code>:1110</code> <code>sendStaged()</code></li>
+        <li><code>api/submit_pdcs.php:10</code> Staff check, <code>:59</code> batch upload, <code>:77</code> transaction starts</li>
+        <li><code>api/submit_pdcs.php:128-146</code> per-check upload / page render</li>
+        <li><code>api/submit_pdcs.php:158</code> <code>INSERT INTO pdcs</code>, <code>:177</code> <code>INSERT INTO refund_schedule</code></li>
+        <li><code>api/submit_pdcs.php:207</code> commit, <code>:209</code> log; <code>main.js:977</code> <code>showSubmitErrors()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">29</td><td class="a">Notify / resend a reminder</td><td><div class="flow"><span>Notify button (workspace, due-dates page, bell)</span><i>→</i><span>POST api/refund_action.php action=notify</span><i>→</i><span>RefundReminder::send()</span><i>→</i><span>RefundNotificationMail → send_mail</span><i>→</i><span>"Notified" stamp</span></div>
+      <ol class="where">
+        <li><code>workspace.php:747-749</code> Notify / Resend buttons, <code>:1080-1081</code> click handler</li>
+        <li><code>assets/js/main.js:1473</code> <code>PDCNotifications.notify()</code>, <code>:1507</code> <code>post()</code></li>
+        <li><code>api/refund_action.php:13</code> Staff check, <code>:46-47</code> notify branch</li>
+        <li><code>includes/classes/RefundReminder.php:34</code> <code>send()</code>, <code>:99</code> <code>send_mail()</code></li>
+        <li><code>includes/RefundNotificationMail.php:41</code> <code>buildRefundMail()</code> (email text)</li>
+      </ol></td></tr>
+    <tr><td class="n">30</td><td class="a">Mark a refund paid</td><td><div class="flow"><span>confirm dialog</span><i>→</i><span>refund_action.php action=done</span><i>→</i><span>refund_schedule.is_done + pdcs.is_paid</span><i>→</i><span>logActivity REFUND_DONE</span><i>→</i><span>all_done flag</span></div>
+      <ol class="where">
+        <li><code>workspace.php:757</code> Mark Paid button, <code>:923-934</code> confirm dialog, <code>:1083</code> handler</li>
+        <li><code>assets/js/main.js:1503</code> <code>markPaid()</code></li>
+        <li><code>api/refund_action.php:50-66</code> checks (found, active, not already done)</li>
+        <li><code>api/refund_action.php:69-79</code> updates + log, <code>:92</code> <code>all_done</code>; next workspace load advances the stage (<code>workspace.php:326</code>)</li>
+      </ol></td></tr>
+    <tr><td class="n">31</td><td class="a">Daily reminder job</td><td><div class="flow"><span>cron (CLI or X-Cron-Token)</span><i>→</i><span>api/cron_refund_reminders.php</span><i>→</i><span>RefundReminder::runDaily()</span><i>→</i><span>proponent emails + staff digest</span></div>
+      <ol class="where">
+        <li><code>api/cron_refund_reminders.php:19-20</code> token check, <code>:29</code> <code>runDaily()</code></li>
+        <li><code>includes/classes/RefundReminder.php:143</code> <code>runDaily()</code>, <code>:229</code> <code>staffRecipients()</code>, <code>:279</code> digest sent</li>
+        <li><code>includes/RefundNotificationMail.php:129</code> <code>buildStaffDigestMail()</code></li>
+      </ol></td></tr>
+  </table>
+</section>
+
+<!-- PART 5 -->
+<section class="part" id="p5" style="--c:var(--p5)">
+  <div class="part-head"><span class="tag">Part 5</span><h3>Progress monitoring (read-only views)</h3><span class="count">7 actions</span></div>
+  <p class="owns">The pages both roles use to see where projects stand. Files: <code>modules/progress/progress-homepage.php</code>, <code>view.php</code>, <code>timeline.php</code>, <code>display_pdcs.php</code>, <code>notifications.php</code>, <code>terminate.php</code>, <code>modules/financial/report.php</code>, <code>api/get_pdcs.php</code>, <code>ActivityLog</code>, <code>StageConfig::dashboardBucket / stageBadge</code>, <code>timeline.css</code>, <code>pdcs.css</code>.</p>
+  <p class="start"><b>Start here:</b> <code>modules/progress/view.php:1-124</code>. It is the read-only twin of the workspace and shows every query these pages reuse.</p>
+  <table>
+    <tr><th>#</th><th>Action</th><th>How it loads · where to look</th></tr>
+    <tr><td class="n">32</td><td class="a">Open the Progress list</td><td><div class="flow"><span>progress-homepage.php</span><i>→</i><span>projects + stage + refund %</span><i>→</i><span>StageConfig::dashboardBucket() badges</span><i>→</i><span>filter chips + search</span></div>
+      <ol class="where">
+        <li><code>progress-homepage.php:6</code> login check, <code>:22-30</code> projects + refund progress query</li>
+        <li><code>progress-homepage.php:44</code> counts per status bucket</li>
+        <li><code>progress-homepage.php:77-81</code> filter bar, <code>:135-147</code> one row per project</li>
+        <li><code>progress-homepage.php:255</code> search/filter script</li>
+      </ol></td></tr>
+    <tr><td class="n">33</td><td class="a">View one project</td><td><div class="flow"><span>progress/view.php?id=</span><i>→</i><span>submissions grouped by stage</span><i>→</i><span>PDC count + refund summary</span><i>→</i><span>Staff: "Continue Project" → workspace</span></div>
+      <ol class="where">
+        <li><code>view.php:8</code> login check, <code>:24</code> project, <code>:38</code> submissions, <code>:46</code> grouped by stage</li>
+        <li><code>view.php:53</code> PDC count, <code>:61</code> refund summary</li>
+        <li><code>view.php:86</code> status bucket, <code>:124</code> <code>ob_start()</code></li>
+        <li><code>view.php:153</code> Continue Project link (Staff only)</li>
+      </ol></td></tr>
+    <tr><td class="n">34</td><td class="a">Open the activity timeline</td><td><div class="flow"><span>timeline.php?id=</span><i>→</i><span>activity_logs for project</span><i>→</i><span>ActivityLog::label() / iconFamily()</span><i>→</i><span>grouped by day, filter chips</span></div>
+      <ol class="where">
+        <li><code>timeline.php:34</code> activity_logs query</li>
+        <li><code>timeline.php:60</code> counts per filter group</li>
+        <li><code>timeline.php:99-112</code> each entry: icon + label</li>
+        <li><code>includes/classes/ActivityLog.php:14</code> <code>iconFamily()</code>, <code>:30</code> <code>iconGlyph()</code>, <code>:49</code> <code>label()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">35</td><td class="a">Browse a project's PDCs</td><td><div class="flow"><span>display_pdcs.php?id=</span><i>→</i><span>cards / table view (saved in localStorage)</span><i>→</i><span>fetch api/get_pdcs.php</span><i>→</i><span>thumbnails via file.php</span></div>
+      <ol class="where">
+        <li><code>display_pdcs.php:19</code> project header query, <code>:39</code> <code>ob_start()</code></li>
+        <li><code>display_pdcs.php:122</code> view choice remembered (<code>ppmis_pdc_view</code>)</li>
+        <li><code>display_pdcs.php:301</code> fetches <code>api/get_pdcs.php</code> (<code>:9</code> login check, <code>:27</code> query)</li>
+        <li><code>display_pdcs.php:157</code> status pill per check</li>
+      </ol></td></tr>
+    <tr><td class="n">36</td><td class="a">Open PDC Due Dates page</td><td><div class="flow"><span>notifications.php</span><i>→</i><span>PDCNotifications.fetch() all rows</span><i>→</i><span>grouped overdue / today / urgent / later</span><i>→</i><span>Notify &amp; Paid buttons (Part 4)</span></div>
+      <ol class="where">
+        <li><code>notifications.php:17</code> login check, <code>:28</code> <code>ob_start()</code> (page is an empty shell)</li>
+        <li><code>notifications.php:336</code> loads every row from <code>api/pdc_notifications.php</code></li>
+        <li><code>notifications.php:204</code> notified stamp, <code>:387</code> Notify, <code>:406</code> Mark Paid</li>
+      </ol></td></tr>
+    <tr><td class="n">37</td><td class="a">Open the financial report</td><td><div class="flow"><span>financial/report.php?id=</span><i>→</i><span>audited financial report files</span><i>→</i><span>PDC + refund summary</span><i>→</i><span>first 12 refund rows</span></div>
+      <ol class="where">
+        <li><code>financial/report.php:19</code> project, <code>:31</code> / <code>:42</code> report submissions</li>
+        <li><code>financial/report.php:51</code> PDC totals, <code>:59</code> refund totals, <code>:69</code> schedule (12 rows)</li>
+        <li><code>financial/report.php:310</code> link to the full schedule in the workspace</li>
+      </ol></td></tr>
+    <tr><td class="n">38</td><td class="a">Terminate a project</td><td><div class="flow"><span>terminate.php?id= (requireStaff)</span><i>→</i><span>blocks if already terminated/completed</span><i>→</i><span>POST: upload supporting docs</span><i>→</i><span>UPDATE projects → terminated</span><i>→</i><span>logActivity</span></div>
+      <ol class="where">
+        <li><code>terminate.php:7</code> <code>requireStaff()</code>, <code>:35</code> already closed → refuse</li>
+        <li><code>terminate.php:40-41</code> POST + CSRF, <code>:51</code> upload</li>
+        <li><code>terminate.php:83</code> stage set to terminated, <code>:90</code> log</li>
+        <li><code>terminate.php:200-216</code> confirm dialog script</li>
+      </ol></td></tr>
+  </table>
+</section>
+
+<!-- PART 6 -->
+<section class="part" id="p6" style="--c:var(--p6)">
+  <div class="part-head"><span class="tag">Part 6</span><h3>Amendments</h3><span class="count">7 actions</span></div>
+  <p class="owns">Duration extensions, realignments and restructurings of an approved project. The rules live in one class; <code>amendments.js</code> is the second-largest script (≈1,000 lines). Files: <code>modules/amendments/index.php</code>, <code>request.php</code>, <code>view.php</code>, <code>Amendment</code>, <code>AmendmentSettings</code> (reading the limits), <code>assets/js/amendments.js</code>, <code>api/amendment_pdcs.php</code>.</p>
+  <p class="start"><b>Start here:</b> <code>includes/classes/Amendment.php</code> (566 lines). The pages are thin; nearly every decision is a method in this class.</p>
+  <table>
+    <tr><th>#</th><th>Action</th><th>How it loads · where to look</th></tr>
+    <tr><td class="n">39</td><td class="a">Open the Amendments list</td><td><div class="flow"><span>amendments/index.php</span><i>→</i><span>all amendments + project</span><i>→</i><span>status filter chips</span></div>
+      <ol class="where">
+        <li><code>amendments/index.php:6</code> login check, <code>:8-25</code> list query</li>
+        <li><code>amendments/index.php:26-83</code> table + filter chips</li>
+      </ol></td></tr>
+    <tr><td class="n">40</td><td class="a">Request an amendment</td><td><div class="flow"><span>request.php?project_id=&amp;type=</span><i>→</i><span>Amendment::check() against AmendmentSettings limits</span><i>→</i><span>POST: Amendment::create()</span><i>→</i><span>view.php?id=</span></div>
+      <ol class="where">
+        <li><code>request.php:7</code> <code>requireStaff()</code>, <code>:26</code> <code>AmendmentSettings::get()</code></li>
+        <li><code>request.php:50-51</code> pre-check: is this type allowed right now?</li>
+        <li><code>request.php:30-32</code> POST → <code>Amendment::create()</code></li>
+        <li><code>Amendment.php:37</code> <code>check()</code> (the rules), <code>:118</code> <code>create()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">41</td><td class="a">Open an amendment folder</td><td><div class="flow"><span>view.php?id=</span><i>→</i><span>Amendment::load() + steps()</span><i>→</i><span>Request / Approvals / Documents cards</span><i>→</i><span>next approver highlighted</span></div>
+      <ol class="where">
+        <li><code>view.php:11-16</code> login + <code>Amendment::load()</code> (<code>Amendment.php:194</code>)</li>
+        <li><code>view.php:142-153</code> steps split into sections, next approval found</li>
+        <li><code>Amendment.php:381</code> <code>steps()</code> (what is locked / open)</li>
+        <li><code>view.php:283</code> Request card, <code>:309</code> Approvals card, documents after</li>
+      </ol></td></tr>
+    <tr><td class="n">42</td><td class="a">Submit for approval</td><td><div class="flow"><span>action=submit_request</span><i>→</i><span>Amendment::submitForApproval()</span><i>→</i><span>status draft → requested</span></div>
+      <ol class="where">
+        <li><code>view.php:43-45</code> POST + CSRF + action</li>
+        <li><code>view.php:68-72</code> <code>submit_request</code> branch</li>
+        <li><code>Amendment.php:237</code> <code>submitForApproval()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">43</td><td class="a">Record an approval decision</td><td><div class="flow"><span>action=record_approval (+ letter upload)</span><i>→</i><span>Amendment::recordApproval()</span><i>→</i><span>approved → advanceIfComplete() · rejected → closed</span></div>
+      <ol class="where">
+        <li><code>view.php:74-100</code> <code>record_approval</code> branch (upload <code>:77</code>, record <code>:81</code>, advance <code>:91</code>)</li>
+        <li><code>Amendment.php:265</code> <code>recordApproval()</code>, <code>:555</code> <code>advanceIfComplete()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">44</td><td class="a">Upload amendment documents &amp; new PDCs</td><td><div class="flow"><span>action=save_files → Amendment::saveFile()</span><i>|</i><span>AmendmentPDCModal (amendments.js)</span><i>→</i><span>api/amendment_pdcs.php</span><i>→</i><span>revised schedule</span></div>
+      <ol class="where">
+        <li><code>view.php:104-131</code> <code>save_files</code> branch, <code>Amendment.php:484</code> <code>saveFile()</code></li>
+        <li><code>view.php:370</code> PDC button, <code>:449-457</code> config passed to the script</li>
+        <li><code>assets/js/amendments.js:23</code> <code>AmendmentPDCModal</code>, <code>:72</code> <code>open()</code>, <code>:757</code> AI read, <code>:917</code> <code>save()</code></li>
+        <li><code>api/amendment_pdcs.php:20</code> login, <code>:60</code> Staff check, <code>:172</code> / <code>:176</code> inserts</li>
+      </ol></td></tr>
+    <tr><td class="n">45</td><td class="a">Unlock a step / cancel</td><td><div class="flow"><span>action=unlock_step → Amendment::unlockStep()</span><i>|</i><span>action=cancel → Amendment::cancel()</span></div>
+      <ol class="where">
+        <li><code>view.php:48-60</code> unlock branch, <code>:62-66</code> cancel branch</li>
+        <li><code>Amendment.php:526</code> <code>unlockStep()</code>, <code>:546</code> <code>cancel()</code></li>
+      </ol></td></tr>
+  </table>
+</section>
+
+<!-- PART 7 -->
+<section class="part" id="p7" style="--c:var(--p7)">
+  <div class="part-head"><span class="tag">Part 7</span><h3>Proponents, reports, analytics, users &amp; system settings</h3><span class="count">8 actions</span></div>
+  <p class="owns">The supporting modules and the admin side. Files: <code>modules/proponents/create.php</code>, <code>modules/report/reports.php</code>, <code>modules/analytics/analytics.php</code>, <code>assets/js/analytics.js</code>, <code>modules/admin/users.php</code>, <code>modules/settings/settings.php</code> (admin sections), <code>api/ai_settings.php</code>, <code>api/amendment_settings.php</code>, <code>api/clock_settings.php</code>, <code>AISettings</code>, <code>AmendmentSettings</code>, <code>SystemClock</code>.</p>
+  <p class="start"><b>Start here:</b> <code>modules/admin/users.php:108-380</code>. One POST block handles all five user actions, so it shows the pattern for the rest of this part.</p>
+  <table>
+    <tr><th>#</th><th>Action</th><th>How it loads · where to look</th></tr>
+    <tr><td class="n">46</td><td class="a">Manage proponents</td><td><div class="flow"><span>proponents/create.php</span><i>→</i><span>list + search/filter</span><i>→</i><span>modal POST action=create|update|toggle (Staff only)</span><i>→</i><span>redirect</span></div>
+      <ol class="where">
+        <li><code>proponents/create.php:7-8</code> Staff-only flags</li>
+        <li><code>proponents/create.php:23-54</code> create, <code>:56-86</code> update, <code>:88-110</code> toggle active</li>
+        <li><code>proponents/create.php:422</code> search/filter script</li>
+      </ol></td></tr>
+    <tr><td class="n">47</td><td class="a">Reports: view &amp; add a submission</td><td><div class="flow"><span>reports.php?project=</span><i>→</i><span>recurring_submissions per type</span><i>→</i><span>POST: handleUpload → INSERT (Staff only)</span><i>→</i><span>links to generator (not covered)</span></div>
+      <ol class="where">
+        <li><code>reports.php:26</code> <code>$canAdd = isStaff()</code>, <code>:30-45</code> project filter + list</li>
+        <li><code>reports.php:47-100</code> POST: upload <code>:66</code>, insert <code>:71</code></li>
+        <li><code>reports.php:109</code> / <code>:130</code> submission lists</li>
+      </ol></td></tr>
+    <tr><td class="n">48</td><td class="a">Open Analytics</td><td><div class="flow"><span>analytics.php</span><i>→</i><span>aggregate queries</span><i>→</i><span>json_encode into page</span><i>→</i><span>analytics.js initAnalyticsCharts() → Chart.js</span></div>
+      <ol class="where">
+        <li><code>analytics.php:13-100</code> the aggregate queries</li>
+        <li><code>analytics.php:348-366</code> data handed to the browser as JSON</li>
+        <li><code>analytics.php:368</code> adds <code>analytics.js</code> through <code>$extraScripts</code></li>
+        <li><code>assets/js/analytics.js:63</code> <code>initAnalyticsCharts()</code>, charts at <code>:79</code> and <code>:151</code></li>
+      </ol></td></tr>
+    <tr><td class="n">49</td><td class="a">Create / edit a user</td><td><div class="flow"><span>users.php (requireAdmin)</span><i>→</i><span>modal POST action=create|update</span><i>→</i><span>validate + hash password</span><i>→</i><span>redirect + flash</span></div>
+      <ol class="where">
+        <li><code>users.php:13</code> <code>requireAdmin()</code>, <code>:108-109</code> POST + CSRF</li>
+        <li><code>users.php:114-160</code> create (hash at <code>:145</code>)</li>
+        <li><code>users.php:162-254</code> update</li>
+      </ol></td></tr>
+    <tr><td class="n">50</td><td class="a">Approve / reject a sign-up</td><td><div class="flow"><span>action=approve_signup | reject_signup</span><i>→</i><span>UPDATE approval_status</span><i>→</i><span>email the applicant</span></div>
+      <ol class="where">
+        <li><code>users.php:292-340</code> approve (must have verified email first)</li>
+        <li><code>users.php:342-380</code> reject</li>
+        <li><code>users.php:73</code> <code>sendSignupDecisionEmail()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">51</td><td class="a">Activate / deactivate a user</td><td><div class="flow"><span>action=toggle_status</span><i>→</i><span>UPDATE status</span><i>→</i><span>that user is logged out within 60 s (Part 1, action 2)</span></div>
+      <ol class="where">
+        <li><code>users.php:256-290</code> toggle branch (update at <code>:273</code>)</li>
+        <li><code>includes/session.php:78-88</code> where the deactivated user gets logged out</li>
+      </ol></td></tr>
+    <tr><td class="n">52</td><td class="a">AI settings</td><td><div class="flow"><span>settings.php (admin section)</span><i>→</i><span>fetch api/ai_settings.php set_enabled | test</span><i>→</i><span>AISettings::setEnabled() / testConnection()</span></div>
+      <ol class="where">
+        <li><code>settings.php:14</code> <code>$canEditAI</code>, <code>:464</code> fetch</li>
+        <li><code>api/ai_settings.php:30</code> admin check, <code>:54</code> <code>set_enabled</code>, <code>:80</code> <code>test</code></li>
+        <li><code>AISettings.php:286</code> <code>setEnabled()</code>, <code>:368</code> <code>testConnection()</code>, <code>:194</code> <code>status()</code></li>
+      </ol></td></tr>
+    <tr><td class="n">53</td><td class="a">Amendment rules &amp; system clock</td><td><div class="flow"><span>fetch api/amendment_settings.php → AmendmentSettings::save()</span><i>|</i><span>fetch api/clock_settings.php → SystemClock::saveAuto / saveManual</span><i>→</i><span>dev-clock banner in header</span></div>
+      <ol class="where">
+        <li><code>settings.php:198</code> clock section, <code>:594</code> fetch</li>
+        <li><code>api/clock_settings.php:14</code> admin check, <code>:34</code> / <code>:36</code> save</li>
+        <li><code>SystemClock.php:158</code> <code>saveAuto()</code>, <code>:167</code> <code>saveManual()</code>, <code>:127</code> applied to the DB connection</li>
+        <li><code>settings.php:624</code> amendment rules fetch → <code>api/amendment_settings.php:27</code> → <code>AmendmentSettings.php:172</code> <code>save()</code></li>
+      </ol></td></tr>
+  </table>
+</section>
+
+<div class="ex">
+  <h2>Tips for the split</h2>
+  <ul>
+    <li>Part 1 should present first: the others all reuse its pipeline, gates and flash/redirect pattern.</li>
+    <li>Parts 3 and 4 share <code>workspace.php</code>: Part 3 covers the stage cards, Part 4 the schedule and PDC cards.</li>
+    <li>Parts 4 and 5 meet on the PDC Due Dates page: Part 5 explains how the page loads, Part 4 what the Notify and Paid buttons do.</li>
+    <li>Part 6 reuses Part 4's PDC modal ideas in <code>amendments.js</code>.</li>
+    <li>Role rule everyone should know: Staff do the project work; Admin can read everything, manages users and settings, and cannot open <code>modules/project/</code>.</li>
+    <li>Uploads always go through <code>handleUpload()</code> (<code>includes/upload.php:10</code>) → Azure Blob, and are read back through <code>file.php</code>.</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>
